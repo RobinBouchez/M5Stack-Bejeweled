@@ -7,23 +7,10 @@
 #include <vector>
 // #include "../lib/grid/grid.h"
 // #include "../lib/menu/menu.h"
+#include "../lib/jewel/jewel.h"
+#include "../lib/selector/selector.h"
 
-struct jewel
-{
-  u_int8_t x;
-  u_int8_t y;
-  unsigned int color;
-};
-typedef struct jewel Jewel;
 
-struct selector
-{
-  Jewel *jewel1;
-  Jewel *jewel2;
-};
-typedef struct selector Selector;
-
-Selector *selector;
 
 u_int8_t padding_x = 20;
 u_int8_t padding_y = 80;
@@ -61,11 +48,11 @@ void selectMenu(void);
 Jewel ***create_grid(void);
 void drawSelector(void);
 bool end_game = false;
-void swapJewel(Jewel *, Jewel *);
+void swapJewel(Jewel*, Jewel*);
 bool game_is_ended = false;
 void rotateSelector(void);
 bool valid_swap(Selector*);
-void freeGrid();
+void freeGrid(void);
 void moveSelector(float, float, float);
 bool can_move_selector = false;
 u_int8_t selector_delay = 10; // 10 seconds
@@ -133,9 +120,9 @@ void loop()
     if (valid_swap(selector))
     {
       swapJewel(selector->jewel1, selector->jewel2);
-      score = destroy_jewel(selector);
+      //score = destroy_jewel(selector);
       moves_left--;
-      // delete_jewel();
+      //delete_jewel();
       drawGame();
     }
   }
@@ -173,7 +160,7 @@ void moveSelector(float p, float r, float y)
     selector_y = M5.Lcd.height() - padding_y;
   if (selector_y + selector_height > M5.Lcd.height() - padding_y)
     selector_y = padding_y;
-  EEPROM.
+  
   if (p > .2f)
   {
     selector_x += jewel_width;
@@ -405,12 +392,24 @@ bool checkRowJewel(Jewel jewel, const unsigned int color)
     right++;
   }
 
+  if(right >= 3) {
+    for (int i = 0; i < right; i++)
+    {
+      pGrid[jewel.x + i][jewel.y]->color = BLACK;
+    }  
+  }
   while (pGrid[jewel.x - left][jewel.y]->color == color)
   {
-    left--;
+    left++;
+  }
+  if(left >= 3) {
+    for (int i = 0; i < left; i++)
+    {
+      pGrid[jewel.x - i][jewel.y]->color = BLACK;
+    }  
   }
 
-  return (right - left + 1 >= 3);
+  return (right + left >= 3);
 }
 
 bool checkColJewel(Jewel jewel, const unsigned int color)
@@ -425,15 +424,15 @@ bool checkColJewel(Jewel jewel, const unsigned int color)
 
   while (pGrid[jewel.x][jewel.y - bottom]->color == color)
   {
-    bottom--;
+    bottom++;
   }
 
-  return (top - bottom + 1 >= 3);
+  return (top + bottom >= 3);
 }
 
 void swapJewel(Jewel *jewel1, Jewel *jewel2)
 {
-  unsigned int temp = jewel1->color;
+  u_int8_t temp = jewel1->color;
   jewel1->color = jewel2->color;
   jewel2->color = temp;
 }
@@ -470,18 +469,21 @@ void delete_jewel()
 {
   int jewel1_x = selector->jewel1->x;
   int jewel1_y = selector->jewel1->y;
-
+  int jewel2_x = selector->jewel2->x;
+  int jewel2_y = selector->jewel2->y;
   do
   {
     jewel1_x++;
     selector->jewel1->color = BLACK;
-  } while (pGrid[jewel1_x][jewel1_y]->color == selector->jewel2->color);
-
+  } while (pGrid[jewel1_x][jewel1_y]->color == selector->jewel1->color);
   do
   {
-    jewel1_x--;
-    selector->jewel1->color = BLACK;
-  } while (pGrid[jewel1_x][jewel1_y]->color == selector->jewel2->color);
+    jewel2_x++;
+    selector->jewel2->color = BLACK;
+  } while (pGrid[jewel2_x][jewel2_y]->color == selector->jewel2->color);
+
+
+
 }
 
 void fall_bricks(Jewel* jwl, unsigned int amount, int xdir, int ydir) {
