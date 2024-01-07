@@ -7,12 +7,20 @@
 #define BACK 1
 #define SAVE 2
 #define LOAD 3
-#define RESET 4
-#define GAME 5
+#define RESET 0
 
-#define MENUSIZE 5
+#define MENUSIZE 4
+
+#define MENU_X 20
+#define MENU_Y 20
+
+#define GAME_MODE_ARR_SIZE 2
+
+#define MENU_TIME_OUT 10
 
 bool isInMenu = false;
-char* menu[MENUSIZE] = {"BACK", "SAVE", "LOAD", "RESET LEVEL", "CHANGE GAME MODE"};
+
+char* menu[MENUSIZE] = {"BACK", "SAVE", "LOAD", "RESET LEVEL"};
+char* game_modes[GAME_MODE_ARR_SIZE] = {"EASY MODE", "CLASSIC MODE"};
 
 #endif //MENU_H

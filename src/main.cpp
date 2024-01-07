@@ -5,100 +5,64 @@
 #include <stdbool.h>
 #include "EEPROM.h"
 #include <vector>
-// #include "../lib/grid/grid.h"
+
+#include "constants.h"
+
 #include "menu.h"
 #include "selector.h"
 #include "jewel.h"
-#include "../include/gamemode.h"
-
-// #include "../lib/jewel/jewel.h"
-//  #include "../lib/selector/selector.h"
-
-#define VARIANTSIZE 2
-char *variants[VARIANTSIZE]{"EASY", "HARD"};
-
-Selector selector;
-
-#define START_LEVEL_INDEX 0
-uint8_t level = START_LEVEL_INDEX;
+#include "gamemode.h"
+#include "grid.h"
 
 
-uint8_t padding_x = 10;
-uint8_t padding_y = 80;
-uint8_t cursor_offset = 20;
-uint8_t jewel_width = 12;
-uint8_t jewel_height = 12;
-
-int selectedItem = 0;
-uint8_t level_multiplier = 1;
-uint8_t score_multiplier = 10;
+uint8_t jewel_width;
+uint8_t jewel_height;
 
 bool start_game = false;
-#define MAX_JEWEL_AMOUNT 8
-#define MAX_JEWEL_COLOR_AMOUNT MAX_JEWEL_AMOUNT - 1
-#define MIN_JEWEL_AMOUNT 4
-uint8_t jewel_color_size = 7;
+
+uint8_t jewel_color_size = MAX_COLOR_SIZE;
 uint8_t jewel_amount = MIN_JEWEL_AMOUNT;
 uint16_t jewel_color[MAX_JEWEL_COLOR_AMOUNT]{RED, BLUE, GREEN, ORANGE, YELLOW, WHITE, PINK};
 
-uint8_t selector_width = jewel_width * 2;
-uint8_t selector_height = jewel_height;
-
 RTC_TimeTypeDef TimeStruct;
-Jewel **pGrid;
 
 uint8_t moves_left = 60;
 uint16_t score = 0;
 
-#define JEWEL_THRESHOLD 3
+int selectedItem = 0;
+Jewel **pGrid;
+Selector selector;
 
-void drawList(char *[], int);
-void drawGame(void);
-void selectMenu(char *[]);
-Jewel **create_grid(void);
-void drawSelector(void);
 bool end_game = false;
-
-bool game_is_ended = false;
-void rotateSelector(void);
-bool validSwap(Selector selector);
-void freeGrid(void);
-void moveSelector(float, float, float);
 bool can_move_selector = true;
-uint8_t selector_delay = 10; // 10 seconds
-int deleteJewel(Jewel**, Jewel, const unsigned int);
-void drawModeSelection(void);
-void selectVariants(char *[]);
-void drawScore(void);
-void drawDiamond(uint8_t, uint8_t);
+bool game_is_ended = false;
 
-void setupLevel(uint8_t level_index)
-{
-  if (level_index != START_LEVEL_INDEX && jewel_amount != MAX_JEWEL_AMOUNT)
-  {
-    jewel_amount++;
-  }
-  jewel_color_size = jewel_amount - 1;
+void rotateSelector(void);
+bool validSwap(Selector);
+void setupLevel(uint8_t);
 
-  jewel_width = (M5.Lcd.width() - padding_x * 2) / jewel_amount;
-  jewel_height = jewel_width;
+//--------------------------------------------
+// UPDATE FUNCTION DECLARATIONS
+//--------------------------------------------
+void updateGame(void);
+void updateMenu(int, int, char *[]);
+void updateSelector(float, float, float);
+void updateGamemode(int, int, char *[]);
+int updateJewels(Jewel **, Jewel, const unsigned int);
 
-  selector.rotation = horizontal;
-  selector_width = jewel_width * 2;
-  selector_height = jewel_height;
-
-  level_multiplier = (level_index + 1);
-
-  pGrid = create_grid();
-
-  selector.pos_1.x = 1;
-  selector.pos_2.x = 2;
-  selector.pos_1.y = 1;
-  selector.pos_2.y = 1;
-
-  moves_left = ((jewel_amount * 2) / level_multiplier) * score_multiplier;
-  drawGame();
-}
+//--------------------------------------------
+// DRAW FUNCTION DECLARATIONS
+//--------------------------------------------
+void drawList(int, int, char *[], int);
+void drawGrid(Jewel **);
+void drawGame(void);
+void drawScore(uint16_t);
+void drawMoves(uint8_t);
+void drawCell(uint8_t, uint8_t, JewelType, uint16_t);
+void drawJewel(uint8_t, uint8_t, uint8_t, uint8_t, uint16_t);
+void drawDiamond(uint8_t, uint8_t, uint8_t, uint8_t, uint16_t);
+void drawSelector(Selector, uint8_t, uint8_t, uint16_t);
+void drawNewGrid(Jewel **, Jewel **);
 
 void setup()
 {
@@ -113,88 +77,287 @@ void setup()
   M5.Lcd.setTextSize(1);
   M5.Lcd.fillScreen(BLACK);
   setupLevel(level);
+  TimeStruct.Seconds = 0;
   M5.Rtc.SetTime(&TimeStruct);
-  // selector = create_selector();
+  drawList(GAME_MODE_X, GAME_MODE_Y, game_modes, GAME_MODE_ARR_SIZE);
+}
+
+// the loop routine runs over and over again forever
+void loop()
+{
+  M5.update();
+  if (game_is_ended) return;
+
+  if (!start_game)
+  {
+    updateGamemode(GAME_MODE_X, GAME_MODE_Y, game_modes);
+    return;
+  }
+
+  if (isInMenu)
+  {
+    updateMenu(MENU_X, MENU_Y, menu);
+    return;
+  }
+  if (end_game)
+  {
+    M5.Lcd.fillScreen(BLACK);
+    freeGrid(pGrid, jewel_amount, jewel_amount);
+    game_is_ended = true;
+    return;
+  }
+
+  updateGame();
+
+  delay(300);
+}
+
+void rotateSelector(void)
+{
+  if (selector.rotation == horizontal)
+  {
+    if (selector.pos_1.y < jewel_amount - 1)
+    {
+      selector.pos_2.x = selector.pos_1.x;
+      selector.pos_2.y = selector.pos_1.y + 1;
+      selector_width = jewel_width;
+      selector_height = jewel_height * 2;
+      selector.rotation = vertical;
+    }
+  }
+  else
+  {
+    if (selector.pos_1.x < jewel_amount - 1)
+    {
+      selector.pos_2.x = selector.pos_1.x + 1;
+      selector.pos_2.y = selector.pos_1.y;
+      selector_width = jewel_width * 2;
+      selector_height = jewel_height;
+      selector.rotation = horizontal;
+    }
+  }
+}
+
+uint16_t getRandColor(uint8_t color_size)
+{
+  return jewel_color[rand() % jewel_color_size];
+}
+
+void setupLevel(uint8_t level_index)
+{
+  if (level_index != START_LEVEL_INDEX && jewel_amount != MAX_JEWEL_AMOUNT)
+  {
+    jewel_amount = level_index + MIN_JEWEL_AMOUNT;
+  }
+  jewel_color_size = jewel_amount - 1;
+
+  jewel_width = (M5.Lcd.width() - PADDING_X * 2) / jewel_amount;
+  jewel_height = jewel_width;
+
+  selector.rotation = horizontal;
+  selector_width = jewel_width * 2;
+  selector_height = jewel_height;
+
+  level_multiplier = (level_index + 1);
+
+  pGrid = create_grid(jewel_amount, jewel_amount, jewel_color_size, &getRandColor);
 
   selector.pos_1.x = 1;
   selector.pos_2.x = 2;
   selector.pos_1.y = 1;
   selector.pos_2.y = 1;
 
-  drawList(variants, VARIANTSIZE);
+  moves_left = ((jewel_amount * 2) / level_multiplier) * score_multiplier;
+  drawGame();
 }
 
-void printColor(unsigned int color)
+void restartGame(void)
 {
-  if (color == YELLOW)
+  score = 0;
+  freeGrid(pGrid, jewel_amount, jewel_amount);
+  pGrid = create_grid(jewel_amount, jewel_amount, jewel_color_size, &getRandColor);
+
+  setupLevel(level);
+}
+
+void saveGame()
+{
+  int address = 0;
+  uint8_t lower_score = score % 256;
+  uint8_t upper_score = score >> 8;
+
+  // save score
+  EEPROM.writeByte(address, lower_score);
+  address++;
+  EEPROM.writeByte(address, upper_score);
+
+  // save moves_left
+  address++;
+  EEPROM.writeByte(address, moves_left);
+
+  // save gamemode
+  address++;
+  EEPROM.writeByte(address, game_mode);
+
+  // save grid
+  address++;
+  for (int i = 0; i < jewel_amount; i++)
   {
-    Serial.print("Yellow");
+    for (int j = 0; j < jewel_amount; j++)
+    {
+      uint8_t lower_color = pGrid[i][j].color % 256;
+      uint8_t upper_color = pGrid[i][j].color >> 8;
+
+      EEPROM.writeByte(address, lower_color);
+      address++;
+      EEPROM.writeByte(address, upper_color);
+      address++;
+    }
   }
-  else if (color == ORANGE)
+
+  EEPROM.commit();
+}
+
+void loadGame()
+{
+  int address = 0;
+  uint8_t lower_score = EEPROM.readByte(address);
+  address++;
+  uint8_t upper_score = EEPROM.readByte(address);
+  score = (upper_score << 8) | lower_score;
+
+  address++;
+  moves_left = EEPROM.readByte(address);
+
+  address++;
+  uint8_t mode = game_mode;
+  mode = EEPROM.readByte(address);
+  if (mode == 1)
   {
-    Serial.print("Orange");
-  }
-  else if (color == BLACK)
-  {
-    Serial.print("Black");
-  }
-  else if (color == GREEN)
-  {
-    Serial.print("Green");
-  }
-  else if (color == RED)
-  {
-    Serial.print("Red");
-  }
-  else if (color == BLUE)
-  {
-    Serial.print("Blue");
-  }
-  else if (color == WHITE)
-  {
-    Serial.print("White");
-  }
-  else if (color == PURPLE)
-  {
-    Serial.print("Purple");
-  }
-  else if (color == PINK)
-  {
-    Serial.print("Pink");
+    game_mode = EASY;
   }
   else
+    game_mode = HARD;
+
+  // Load grid
+  address++;
+  for (int i = 0; i < jewel_amount; i++)
   {
-    Serial.print("Not a color");
+    for (int j = 0; j < jewel_amount; j++)
+    {
+      uint8_t lower_color = EEPROM.readByte(address);
+      address++;
+      uint8_t upper_color = EEPROM.readByte(address);
+      pGrid[i][j].color = (upper_color << 8) | lower_color;
+      address++;
+    }
   }
 }
 
-// the loop routine runs over and over again forever
-void loop()
+//----------------------------------------------------------------
+// SELECTING LOGIC & UPDATE DEFENITIONS
+//----------------------------------------------------------------
+int select(int x, int y, int idx, char *arr[], const int size)
 {
-  int old_score = score;
-  M5.update();
-  if (!start_game)
+  if (M5.BtnB.wasPressed())
   {
-    selectVariants(variants);
-    return;
-  }
-
-  if (isInMenu)
-  {
-    selectMenu(menu);
-    return;
-  }
-
-  if (game_is_ended)
-    return;
-  if (end_game)
-  {
+    TimeStruct.Seconds = 0;
+    M5.Rtc.SetTime(&TimeStruct);
     M5.Lcd.fillScreen(BLACK);
-    freeGrid();
-    game_is_ended = true;
+    for (int i = 0; i < size; i++)
+    {
+      M5.Lcd.setTextColor(WHITE);
+      if (i == idx)
+      {
+        M5.Lcd.setTextColor(BLUE);
+      }
+      M5.Lcd.setCursor(x, y + (y * i));
+      M5.Lcd.printf(arr[i]);
+    }
+    idx = (idx + 1) % size;
+    M5.Beep.tone(700, BEEP_DURATION);
+  }
+  return idx;
+}
+
+void updateGamemode(int x, int y, char *modes[])
+{
+  selectedItem = select(x, y, selectedItem, modes, GAME_MODE_ARR_SIZE);
+  if (M5.BtnA.wasPressed())
+  {
+    switch (selectedItem)
+    {
+    case EASY:
+      start_game = true;
+      drawGame();
+      selectedItem = 0;
+      game_mode = EASY;
+      break;
+    case HARD:
+      start_game = true;
+      selectedItem = 0;
+      game_mode = HARD;
+      level = MAX_JEWEL_AMOUNT - 1;
+      setupLevel(level);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void updateMenu(int x, int y, char *menu[])
+{
+  if (TimeStruct.Seconds >= MENU_TIME_OUT)
+  {
+    isInMenu = false;
+    drawGame();
     return;
   }
+  selectedItem = select(x, y, selectedItem, menu, MENUSIZE);
+  if (M5.BtnA.wasPressed())
+  {
+    M5.Beep.tone(1000, BEEP_DURATION);
+    switch (selectedItem)
+    {
+    case BACK:
+      break;
+    case LOAD:
+      loadGame();
+      break;
+    case SAVE:
+      saveGame();
+      break;
+    case RESET:
+      restartGame();
+      break;
+    default:
+      break;
+    }
+    isInMenu = false;
+    selectedItem = 0;
+    drawGame();
+  }
+  M5.Rtc.GetTime(&TimeStruct);
+}
+void updateGrid() {
+  for (int i = 0; i < jewel_amount; i++)
+  {
+    for (int j = 0; j < jewel_amount; j++)
+    {
+      score += updateJewels(pGrid, pGrid[i][j], pGrid[i][j].color);
+      if (score > (2 * level_multiplier) * 100)
+      {
+        level++;
+        setupLevel(level);
+        return;
+      };
+    }
+  }
+}
 
+void updateGame() {
+  uint16_t old_score = score;
   if (M5.BtnA.wasPressed() && M5.BtnB.wasPressed())
   {
     if (validSwap(selector))
@@ -202,45 +365,34 @@ void loop()
       swapJewel(pGrid, selector);
       moves_left--;
       drawGame();
-      score += deleteJewel(pGrid, pGrid[selector.pos_1.x][selector.pos_1.y], pGrid[selector.pos_1.x][selector.pos_1.y].color) * level_multiplier;
-      score += deleteJewel(pGrid, pGrid[selector.pos_2.x][selector.pos_2.y], pGrid[selector.pos_2.x][selector.pos_2.y].color) * level_multiplier;
     }
   }
   else if (M5.BtnA.wasPressed())
   {
     rotateSelector();
-    drawSelector();
+    drawSelector(selector, selector_width, selector_height, BLACK);
   }
   else if (M5.BtnB.wasPressed())
   {
-    drawList(menu, MENUSIZE);
     isInMenu = true;
     return;
   }
-  M5.IMU.getAccelData(&acc_x, &acc_y, &acc_z);
-  moveSelector(acc_x, acc_y, acc_z);
-  end_game = (moves_left == 0);
-  if (score > level_multiplier * 200)
-  {
-    level++;
-    setupLevel(level);
-  };
 
-  for (int i = 0; i < jewel_amount; i++)
-  {
-    for (int j = 0; j < jewel_amount; j++)
-    {
-      score += deleteJewel(pGrid, pGrid[i][j], pGrid[i][j].color);
-    }
-  }
+  M5.IMU.getAccelData(&acc_x, &acc_y, &acc_z);
+  updateSelector(acc_x, acc_y, acc_z);
+  updateGrid();
+
   if (old_score != score)
   {
-    drawScore();
+    drawScore(score);
   }
-  delay(300);
+
+  TimeStruct.Seconds = 0;
+  M5.Rtc.SetTime(&TimeStruct);
+  end_game = (moves_left == 0);
 }
 
-void moveSelector(float p, float r, float y)
+void updateSelector(float p, float r, float y)
 {
   Jewelpos old;
   old.x = selector.pos_1.x;
@@ -349,423 +501,46 @@ void moveSelector(float p, float r, float y)
     selector.pos_2.y = selector.pos_1.y + 1;
   }
 
-  drawSelector();
+  drawSelector(selector, selector_width, selector_height, BLACK);
 }
 
-void freeGrid(void)
-{
-  for (int i = 0; i < jewel_amount; i++)
-    free(pGrid[i]);
+//----------------------------------------------------------------
+// GAME LOGIC
+//----------------------------------------------------------------
 
-  free(pGrid);
-}
-
-void rotateSelector(void)
-{
-  if (selector.rotation == horizontal)
-  {
-    if (selector.pos_1.y < jewel_amount - 1)
-    {
-      selector.pos_2.x = selector.pos_1.x;
-      selector.pos_2.y = selector.pos_1.y + 1;
-      selector_width = jewel_width;
-      selector_height = jewel_height * 2;
-      selector.rotation = vertical;
-    }
-  }
-  else
-  {
-    if (selector.pos_1.x < jewel_amount - 1)
-    {
-      selector.pos_2.x = selector.pos_1.x + 1;
-      selector.pos_2.y = selector.pos_1.y;
-      selector_width = jewel_width * 2;
-      selector_height = jewel_height;
-      selector.rotation = horizontal;
-    }
-  }
-}
-
-Jewel **create_grid(void)
-{
-  Jewel **new_grid = (Jewel **)malloc(jewel_amount * sizeof(Jewel **));
-
-  for (int i = 0; i < jewel_amount; ++i)
-  {
-    new_grid[i] = (Jewel*)malloc(jewel_amount * sizeof(Jewel));
-  }
-
-  for (int i = 0; i < jewel_amount; ++i)
-  {
-    for (int j = 0; j < jewel_amount; ++j)
-    {
-      Jewel new_jewel;
-      new_jewel.position.x = i;
-      new_jewel.position.y = j;
-      new_jewel.color = jewel_color[rand() % jewel_color_size];
-      new_jewel.type = jewel;
-      new_grid[i][j] = new_jewel;
-    }
-  }
-
-  return new_grid;
-}
-
-void drawJewel(const uint8_t x, const uint8_t y)
-{
-  if (pGrid[x][y].type == jewel)
-  {
-    M5.Lcd.fillRect(padding_x + (x * jewel_width), padding_y + (y * jewel_height), jewel_width, jewel_height, pGrid[x][y].color);
-  }
-  else
-    drawDiamond(x, y);
-}
-
-void drawSelectorBounds(const uint8_t x, const uint8_t y)
-{
-  // Draw the current jewel
-  drawJewel(x, y);
-
-  // Right
-  if (x + 1 <= jewel_amount - 1)
-    drawJewel(x + 1, y);
-  // Left
-  if (x - 1 >= 0)
-    drawJewel(x - 1, y);
-  // Top
-  if (y + 1 <= jewel_amount - 1)
-    drawJewel(x, y + 1);
-  // Bottom
-  if (y - 1 >= 0)
-    drawJewel(x, y - 1);
-
-  if (y + 1 <= jewel_amount - 1 && x + 1 <= jewel_amount - 1)
-    drawJewel(x + 1, y + 1);
-
-  if (y - 1 >= 0 && x + 1 <= jewel_amount - 1)
-    drawJewel(x + 1, y - 1);
-
-  if (x - 1 >= 0 && y - 1 >= 0)
-    drawJewel(x - 1, y - 1);
-
-  if (x - 1 >= 0 && y + 1 <= jewel_amount - 1)
-    drawJewel(x - 1, y + 1);
-}
-
-void drawSelector(void)
-{
-  // Serial.print("Jewel1 x = ");
-  // Serial.print(selector.pos_1.x);
-  // Serial.print(" y = ");
-  // Serial.print(selector.pos_1.y);
-  // Serial.print("  color =  ");
-  // printColor(pGrid[selector.pos_1.x][selector.pos_1.y].color);
-  // Serial.println("  ");
-  // Serial.print("Jewel2: x =  ");
-  // Serial.print(selector.pos_1.x);
-  // Serial.print(" y =  ");
-  // Serial.print(selector.pos_2.y);
-  // Serial.print("  color =  ");
-  // printColor(pGrid[selector.pos_2.x][selector.pos_2.y].color);
-  // Serial.println("_______________________");
-
-  drawSelectorBounds(selector.pos_1.x, selector.pos_1.y);
-  drawSelectorBounds(selector.pos_2.x, selector.pos_2.y);
-  M5.Lcd.drawRect(padding_x + selector.pos_1.x * jewel_width, padding_y + selector.pos_1.y * jewel_height, selector_width, selector_height, BLACK);
-}
-
-void restartGame(void)
-{
-  moves_left = 12;
-  freeGrid();
-  pGrid = create_grid();
-  M5.IMU.Init();
-  drawGame();
-}
-int select(int idx, char *arr[], const int size)
-{
-  int selection = idx;
-  int x, y;
-  x = y = padding_x;
-  if (M5.BtnB.wasPressed())
-  {
-    for (int i = 0; i < size; i++)
-    {
-      M5.Lcd.setTextColor(WHITE);
-      if (i == selection)
-      {
-        M5.Lcd.setTextColor(RED);
-      }
-      M5.Lcd.setCursor(x, y + padding_x * i);
-      M5.Lcd.printf(arr[i]);
-    }
-    selection = (selection + 1) % size;
-    M5.Beep.tone(700, 100);
-  }
-  return selection;
-}
-
-void selectVariants(char *modes[])
-{
-  selectedItem = select(selectedItem, modes, VARIANTSIZE);
-  if (M5.BtnA.wasPressed())
-  {
-    M5.Beep.tone(1000, 100);
-    switch (selectedItem)
-    {
-    case EASY:
-      start_game = true;
-      drawGame();
-      selectedItem = 0;
-      game_mode = EASY;
-      break;
-    case HARD:
-      start_game = true;
-      drawGame();
-      selectedItem = 0;
-      game_mode = HARD;
-      break;
-    default:
-      break;
-    }
-  }
-}
-
-void saveGame()
-{
-  int address = 0;
-  uint8_t lower_score = score % 256;
-  uint8_t upper_score = score >> 8;
-
-  // save score
-  EEPROM.writeByte(address, lower_score);
-  address++;
-  EEPROM.writeByte(address, upper_score);
-
-  // save moves_left
-  address++;
-  EEPROM.writeByte(address, moves_left);
-
-  // save gamemode
-  address++;
-  EEPROM.writeByte(address, game_mode);
-
-  // save grid
-  address++;
-  for (int i = 0; i < jewel_amount; i++)
-  {
-    for (int j = 0; j < jewel_amount; j++)
-    {
-      uint8_t lower_color = pGrid[i][j].color % 256;
-      uint8_t upper_color = pGrid[i][j].color >> 8;
-
-      EEPROM.writeByte(address, lower_color);
-      address++;
-      EEPROM.writeByte(address, upper_color);
-      address++;
-    }
-  }
-
-  EEPROM.commit();
-}
-
-void loadGame()
-{
-  int address = 0;
-  uint8_t lower_score = EEPROM.readByte(address);
-  address++;
-  uint8_t upper_score = EEPROM.readByte(address);
-  score = (upper_score << 8) | lower_score;
-
-  address++;
-  moves_left = EEPROM.readByte(address);
-
-  address++;
-  uint8_t mode = game_mode;
-  mode = EEPROM.readByte(address);
-  if (mode == 1)
-  {
-    game_mode = EASY;
-  }
-  else
-    game_mode = HARD;
-
-  // Load grid
-  address++;
-  for (int i = 0; i < jewel_amount; i++)
-  {
-    for (int j = 0; j < jewel_amount; j++)
-    {
-      uint8_t lower_color = EEPROM.readByte(address);
-      address++;
-      uint8_t upper_color = EEPROM.readByte(address);
-      pGrid[i][j].color = (upper_color << 8) | lower_color;
-      address++;
-    }
-  }
-}
-
-void selectMenu(char *menu[])
-{
-  selectedItem = select(selectedItem, menu, MENUSIZE);
-  if (M5.BtnA.wasPressed())
-  {
-    M5.Beep.tone(1000, 100);
-    switch (selectedItem)
-    {
-    case BACK:
-      break;
-    case LOAD:
-      loadGame();
-      break;
-    case SAVE:
-      saveGame();
-      break;
-    case RESET:
-      restartGame();
-      break;
-    default:
-      break;
-    }
-    isInMenu = false;
-    selectedItem = 0;
-    drawGame();
-  }
-}
-void drawList(char *arr[], const int size)
-{
-  int x, y;
-  x = y = padding_x;
-  M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setCursor(x, y);
-  M5.Lcd.setTextColor(WHITE);
-  M5.Lcd.setTextSize(1);
-
-  for (int i = 0; i < size; i++)
-  {
-    M5.Lcd.setCursor(x, y * (i + 1));
-    M5.Lcd.printf(arr[i]);
-  }
-}
-
-void drawDiamond(uint8_t x, uint8_t y)
-{
-  M5.Lcd.fillRect(padding_x + (x * jewel_width), padding_y + (y * jewel_height), jewel_width, jewel_height, BLACK);
-  M5.Lcd.fillTriangle(padding_x + (x * jewel_width), padding_y + (y * jewel_height),
-                      padding_x + ((x + 1) * jewel_width) - jewel_width / 2, padding_y + ((y + 1) * jewel_height) - 1,
-                      padding_x + ((x + 1) * jewel_width) - 1, padding_y + (y * jewel_height),
-                      pGrid[x][y].color);
-}
-
-void drawGrid(Jewel **grid)
-{
-  for (int i = 0; i < jewel_amount; i++)
-  {
-    for (int j = 0; j < jewel_amount; j++)
-    {
-      if (pGrid[i][j].type == diamond)
-      {
-        drawDiamond(i, j);
-      }
-      else
-      {
-        M5.Lcd.fillRect(padding_x + pGrid[i][j].position.x * jewel_width,
-                        padding_y + pGrid[i][j].position.y * jewel_height,
-                        jewel_width, jewel_height, pGrid[i][j].color);
-      }
-    }
-  }
-}
-
-void drawScore(void)
-{
-  M5.Lcd.setCursor(padding_x, cursor_offset);
-  M5.Lcd.setTextColor(WHITE);
-  M5.Lcd.fillRect(padding_x, cursor_offset, M5.Lcd.width(), padding_x, BLACK);
-  M5.Lcd.printf("Moves left: %i", moves_left);
-  M5.Lcd.setCursor(padding_x, cursor_offset * 2);
-  M5.Lcd.fillRect(padding_x, cursor_offset * 2, M5.Lcd.width(), padding_x, BLACK);
-  M5.Lcd.printf("Score: %i", score);
-}
-
-void drawGame(void)
-{
-  M5.Lcd.fillScreen(BLACK);
-  drawScore();
-  drawGrid(pGrid);
-  drawSelector();
-}
-
-bool checkRowJewel(Jewel** grid, Jewel jewel, const uint16_t color)
+bool checkRowJewel(Jewel **grid, Jewel jewel, const uint16_t color)
 {
   uint8_t right = 1;
   uint8_t left = 1;
+  Serial.print("checkrow");
 
-  if (jewel.position.x + right < jewel_amount)
+  while (jewel.position.x + right < jewel_amount && grid[jewel.position.x + right][jewel.position.y].color == color)
   {
-    while (grid[jewel.position.x + right][jewel.position.y].color == color)
-    {
-      if (jewel.position.x + right < jewel_amount)
-      {
-        right++;
-      }
-      else
-        break;
-    }
+    right++;
   }
-
-  if (jewel.position.x - left > 0)
+  while (jewel.position.x - left > 0 && grid[jewel.position.x - left][jewel.position.y].color == color)
   {
-    while (grid[jewel.position.x - left][jewel.position.y].color == color)
-    {
-      if (jewel.position.x - left > 0)
-      {
-        left++;
-      }
-      else
-        break;
-    }
+    left++;
   }
   return right + left - 1 >= JEWEL_THRESHOLD;
 }
 
-bool checkColJewel(Jewel** grid, Jewel jewel, const uint16_t color)
+bool checkColJewel(Jewel **grid, Jewel jewel, const uint16_t color)
 {
   uint8_t top = 1;
   uint8_t bottom = 1;
-  if (jewel.position.y + top < jewel_amount)
+
+  while (jewel.position.y + top < jewel_amount && grid[jewel.position.x][jewel.position.y + top].color == color)
   {
-    while (grid[jewel.position.x][jewel.position.y + top].color == color)
-    {
-      if (jewel.position.y + top < jewel_amount)
-      {
-        top++;
-      }
-      else
-        break;
-    }
+    top++;
   }
-  if (jewel.position.y - bottom > 0)
+  while (jewel.position.y - bottom > 0 && grid[jewel.position.x][jewel.position.y - bottom].color == color)
   {
-    while (grid[jewel.position.x][jewel.position.y - bottom].color == color)
-    {
-      if (jewel.position.y - bottom > 0)
-      {
-        bottom++;
-      }
-      else
-        break;
-    }
+
+    bottom++;
   }
   return top + bottom - 1 >= JEWEL_THRESHOLD;
 }
-
-// void swapJewel(Jewel** grid, Selector selector)
-// {
-//   uint16_t temp = grid[selector.pos_1.x][selector.pos_1.y].color;
-//   grid[selector.pos_1.x][selector.pos_1.y].color = grid[selector.pos_2.x][selector.pos_2.y].color;
-//   grid[selector.pos_2.x][selector.pos_2.y].color = temp;
-// }
 
 bool validSwap(Selector selector)
 {
@@ -799,120 +574,216 @@ int findConsecutiveJewels(int x, int y, int directionX, int directionY, int jewe
          (y + directionY * count >= 0) && (y + directionY * count < jewel_amount) &&
          (grid[x + directionX * count][y + directionY * count].color == color))
   {
-    if (grid[x + directionX * count][y + directionY * count].type == diamond) {
-      grid[x + directionX * count][y + directionY * count].type = jewel;
-      foundDiamond = true;
-    }
+    // if (grid[x + directionX * count][y + directionY * count].type == diamond)
+    // {
+    //   grid[x + directionX * count][y + directionY * count].type = jewel;
+    //   foundDiamond = true;
+    // }
     count++;
   }
 
   return count;
 }
 
-int deleteJewel(Jewel** grid, Jewel jewel, const unsigned int color)
+int updateJewels(Jewel **grid, Jewel jewel, const unsigned int color)
 {
+  int right = findConsecutiveJewels(jewel.position.x, jewel.position.y, RIGHT, NO_DIRECTION, jewel_amount, grid, color);
+  int left = findConsecutiveJewels(jewel.position.x, jewel.position.y, LEFT, NO_DIRECTION, jewel_amount, grid, color);
+  int top = findConsecutiveJewels(jewel.position.x, jewel.position.y, NO_DIRECTION, TOP, jewel_amount, grid, color);
+  int bottom = findConsecutiveJewels(jewel.position.x, jewel.position.y, NO_DIRECTION, BOTTOM, jewel_amount, grid, color);
 
-  int right = findConsecutiveJewels(jewel.position.x, jewel.position.y, 1, 0, jewel_amount, grid, color);
-  int left = findConsecutiveJewels(jewel.position.x, jewel.position.y, -1, 0, jewel_amount, grid, color);
-  int top = findConsecutiveJewels(jewel.position.x, jewel.position.y, 0, 1, jewel_amount, grid, color);
-  int bottom = findConsecutiveJewels(jewel.position.x, jewel.position.y, 0, -1, jewel_amount, grid, color);
-
-    // if (foundDiamond && (right + left - 1 >= JEWEL_THRESHOLD || top + bottom - 1 >= JEWEL_THRESHOLD))
-    // {
-    //   for (int i = 0; i < jewel_amount - 1; i++)
-    //   {
-    //     dropCol(grid, i, jewel.position.y);
-    //   }
-    //     dropCol(grid, jewel.position.x, jewel_amount - 1);
-    // }
-
-  if (right + left - 1 >= JEWEL_THRESHOLD)
-  {
-    for (int i = 0; i < right; i++)
-    {
-      for (int j = 0; j <= jewel_width; j++)
-      {
-        M5.Lcd.fillRect(padding_x + ((jewel.position.x + i) * jewel_width), padding_y + (jewel.position.y * jewel_height), j, jewel_height, BLACK);
-        delay(20);
-      }
-    }
-    for (int i = 0; i < right; i++)
-    {
-      // for (int j = 0; j <= jewel.position.y; j++)
-      // {
-        dropCol(grid, jewel.position.x + i, jewel.position.y);
-        //grid[jewel.position.x + i][jewel.position.y - j].color = (jewel.position.y - j != 0) ? grid[jewel.position.x + i][jewel.position.y - j - 1].color : jewel_color[rand() % jewel_color_size];
-    }
-
-    for (int i = 1; i < left; i++)
-    {
-      for (int j = 0; j <= jewel_width; j++)
-      {
-        M5.Lcd.fillRect(padding_x + ((jewel.position.x - i) * jewel_width), padding_y + (jewel.position.y * jewel_height), j, jewel_height, BLACK);
-        delay(20);
-      }
-    }
-
-    for (int i = 1; i < left; i++)
-    {
-      // for (int j = 0; j <= jewel.position.y; j++)
-      // {
-      //   //printColor(grid[jewel.position.x - i][jewel.position.y - j].color);
-      //   grid[jewel.position.x - i][jewel.position.y - j].color = (jewel.position.y - j != 0) ? grid[jewel.position.x - i][jewel.position.y - 1 - j].color : jewel_color[rand() % jewel_color_size];
-      // }
-      dropCol(grid, jewel.position.x - i, jewel.position.y);
-    }
-
-  //  Serial.println("AFTER "); 
-  //   for (int i = 0; i < jewel_amount; i++) {
-  //     for (int j = 0; j < jewel_amount; j++) {
- 
-  //       //printColor(grid[i][j].color);
-  //       Serial.print(" "); 
-  //     }
-  //     Serial.println(" "); 
+  // if (foundDiamond && (right + left - 1 >= JEWEL_THRESHOLD || top + bottom - 1 >= JEWEL_THRESHOLD))
+  // {
+  //   for (int i = 0; i < jewel_amount - 1; i++)
+  //   {
+  //     dropCol(grid, i, jewel.position.y);
   //   }
-    drawGame();
+  //     dropCol(grid, jewel.position.x, jewel_amount - 1);
+  // }
+
+  if (right + left > JEWEL_THRESHOLD)
+  {
+    Jewel **oldGrid = copyGrid(grid, jewel_amount, jewel_amount);
+    for (int i = 1; i < right + left; i++)
+    {
+      for (int j = 0; j <= jewel_width; j++)
+      {
+        M5.Lcd.fillRect(PADDING_X + ((jewel.position.x - left + i) * jewel_width), PADDING_Y + (jewel.position.y * jewel_height), j, jewel_height, BLACK);
+        delay(10);
+      }
+    }
+
+    for (int i = 1; i < right + left; i++)
+    {
+      dropCol(grid, jewel.position.x - left + i, jewel.position.y);
+    }
+
     if (right + left - 1 > JEWEL_THRESHOLD)
-      grid[jewel.position.x][jewel.position.y].type = diamond;
-    return (score_multiplier * (right + left - JEWEL_THRESHOLD)) * level_multiplier;
+      grid[jewel.position.x - left + 1][jewel.position.y].type = diamond;
+    drawNewGrid(oldGrid, grid);
+    drawGame();
+
+    return score_multiplier * (right + left - 1);
   }
 
-
-  if (top + bottom - 1 >= JEWEL_THRESHOLD)
+  if (top + bottom > JEWEL_THRESHOLD)
   {
-    for (int i = 0; i < top; i++)
+    Jewel **oldGrid = copyGrid(grid, jewel_amount, jewel_amount);
+    for (int i = 0; i < top + bottom - 1; i++)
     {
       for (int j = 0; j <= jewel_height; j++)
       {
-        M5.Lcd.fillRect(padding_x + (jewel.position.x * jewel_width), padding_y + ((jewel.position.y + i) * jewel_height), jewel_width, j, BLACK);
-        delay(20);
-      }
-    }
-    for (int i = 0; i < top; i++)
-    {
-      dropCol(grid, jewel.position.x, jewel.position.y + i);
-    }
-
-    for (int i = 1; i < bottom; i++)
-    {
-      for (int j = 0; j <= jewel_height; j++)
-      {
-        M5.Lcd.fillRect(padding_x + (jewel.position.x * jewel_width), padding_y + ((jewel.position.y - i) * jewel_height), jewel_width, j, BLACK);
-        delay(20);
+        M5.Lcd.fillRect(PADDING_X + (jewel.position.x * jewel_width), PADDING_Y + ((jewel.position.y - (bottom - 1) + i) * jewel_height), jewel_width, j, BLACK);
+        delay(10);
       }
     }
 
-    for (int i = 1; i < bottom; i++)
+    for (int i = 0; i < bottom + top - 1; i++)
     {
-      dropCol(grid, jewel.position.x, jewel.position.y - i);
+      dropCol(grid, jewel.position.x, jewel.position.y - (bottom - 1) + i);
     }
+
+    drawNewGrid(oldGrid, grid);
     drawGame();
-
     if (top + bottom - 1 > JEWEL_THRESHOLD)
-      grid[jewel.position.x][jewel.position.y].type = diamond;
-    return (score_multiplier * (top + bottom - JEWEL_THRESHOLD)) * level_multiplier;
+      grid[jewel.position.x - bottom + 1][jewel.position.y].type = diamond;
+    return score_multiplier * (top + bottom - 1);
   }
 
   return 0;
+}
+
+//----------------------------------------------------------------
+// Draw funtion definitions
+//----------------------------------------------------------------
+
+void drawGame(void)
+{
+  M5.Lcd.fillScreen(BLACK);
+  drawScore(score);
+  drawMoves(moves_left);
+  drawGrid(pGrid);
+  drawSelector(selector, selector_width, selector_height, BLACK);
+}
+
+void drawGrid(Jewel **grid)
+{
+  for (int i = 0; i < jewel_amount; i++)
+  {
+    for (int j = 0; j < jewel_amount; j++)
+    {
+      drawCell(i, j, grid[i][j].type, grid[i][j].color);
+    }
+  }
+}
+
+void drawNewGrid(Jewel **oldGrid, Jewel **newGrid)
+{
+  for (int i = 0; i < jewel_amount; i++)
+  {
+    for (int j = 0; j < jewel_amount; j++)
+    {
+      if (oldGrid[i][j].color != newGrid[i][j].color)
+      {
+        drawCell(i, j, newGrid[i][j].type, newGrid[i][j].color);
+        delay(100);
+      }
+    }
+  }
+}
+
+void drawJewel(const uint8_t x, const uint8_t y, const uint8_t width, const uint8_t height, const uint16_t color)
+{
+  M5.Lcd.fillRect(PADDING_X + (x * width), PADDING_Y + (y * height), width, height, color);
+}
+
+void drawCell(const uint8_t x, const uint8_t y, const JewelType type, const uint16_t color)
+{
+  if (type == jewel)
+  {
+    drawJewel(x, y, jewel_width, jewel_height, color);
+  }
+  else
+  {
+    drawDiamond(x, y, jewel_width, jewel_height, color);
+  }
+}
+
+void drawScore(uint16_t score)
+{
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.setCursor(PADDING_X, CURSOR_OFFSET * 2);
+  M5.Lcd.fillRect(PADDING_X, CURSOR_OFFSET * 2, M5.Lcd.width(), PADDING_X, BLACK);
+  M5.Lcd.printf("Score: %i", score);
+}
+
+void drawMoves(uint8_t moves)
+{
+  M5.Lcd.setCursor(PADDING_X, CURSOR_OFFSET);
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.fillRect(PADDING_X, CURSOR_OFFSET, M5.Lcd.width(), PADDING_X, BLACK);
+  M5.Lcd.printf("Moves left: %i", moves);
+}
+
+void drawList(const int x, const int y, char *arr[], const int size)
+{
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setCursor(x, y);
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.setTextSize(1);
+
+  for (int i = 0; i < size; i++)
+  {
+    M5.Lcd.setCursor(x, y * (i + 1));
+    M5.Lcd.printf(arr[i]);
+  }
+}
+
+void drawDiamond(const uint8_t x, const uint8_t y, const uint8_t width, const uint8_t height, const uint16_t color)
+{
+  M5.Lcd.fillRect(PADDING_X + (x * width), PADDING_Y + (y * height), width, height, BLACK);
+  M5.Lcd.fillTriangle(PADDING_X + (x * width), PADDING_Y + (y * height),
+                      PADDING_X + ((x + 1) * width) - width / 2, PADDING_Y + ((y + 1) * height) - 1,
+                      PADDING_X + ((x + 1) * width) - 1, PADDING_Y + (y * height),
+                      color);
+}
+
+void drawSelectorBounds(const uint8_t x, const uint8_t y)
+{
+  // Draw the current jewel
+  drawCell(x, y, pGrid[x][y].type, pGrid[x][y].color);
+
+  // Right
+  if (x + 1 < jewel_amount)
+    drawCell(x + 1, y, pGrid[x + 1][y].type, pGrid[x + 1][y].color);
+
+  // Left
+  if (x - 1 >= 0)
+    drawCell(x - 1, y, pGrid[x - 1][y].type, pGrid[x - 1][y].color);
+  // Top
+  if (y + 1 < jewel_amount)
+    drawCell(x, y + 1, pGrid[x][y + 1].type, pGrid[x][y + 1].color);
+
+  // Bottom
+  if (y - 1 >= 0)
+    drawCell(x, y - 1, pGrid[x][y - 1].type, pGrid[x][y - 1].color);
+
+  if (y + 1 < jewel_amount && x + 1 < jewel_amount)
+    drawCell(x + 1, y + 1, pGrid[x + 1][y + 1].type, pGrid[x + 1][y + 1].color);
+
+  if (y - 1 >= 0 && x + 1 < jewel_amount)
+    drawCell(x + 1, y - 1, pGrid[x + 1][y - 1].type, pGrid[x + 1][y - 1].color);
+
+  if (x - 1 >= 0 && y - 1 >= 0)
+    drawCell(x - 1, y - 1, pGrid[x - 1][y - 1].type, pGrid[x - 1][y - 1].color);
+
+  if (x - 1 >= 0 && y + 1 < jewel_amount)
+    drawCell(x - 1, y + 1, pGrid[x - 1][y + 1].type, pGrid[x - 1][y + 1].color);
+}
+
+void drawSelector(Selector selector, uint8_t width, uint8_t height, uint16_t color)
+{
+  drawSelectorBounds(selector.pos_1.x, selector.pos_1.y);
+  drawSelectorBounds(selector.pos_2.x, selector.pos_2.y);
+  M5.Lcd.drawRect(PADDING_X + selector.pos_1.x * jewel_width, PADDING_Y + selector.pos_1.y * jewel_height, selector_width, selector_height, color);
 }
