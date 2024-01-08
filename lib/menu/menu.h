@@ -8,14 +8,10 @@
 #define SAVE 2
 #define LOAD 3
 #define RESET 0
-
 #define MENUSIZE 4
-
 #define MENU_X 20
 #define MENU_Y 20
-
 #define GAME_MODE_ARR_SIZE 2
-
 #define MENU_TIME_OUT 10
 
 bool isInMenu = false;
